@@ -2,7 +2,6 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // CORS
     const headers = {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
@@ -36,7 +35,47 @@ export default {
           JSON.stringify({
             success: true,
             database: "connected",
-            result: result
+            result
+          }),
+          { headers }
+        );
+      }
+
+      // فحص مفتاح
+      if (url.pathname === "/check") {
+        const key = url.searchParams.get("key");
+
+        if (!key) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Missing key"
+            }),
+            { status: 400, headers }
+          );
+        }
+
+        const license = await env.DB
+          .prepare(
+            "SELECT license_key, plan, device_id, activated_at, expires_at, status FROM licenses WHERE license_key = ?"
+          )
+          .bind(key)
+          .first();
+
+        if (!license) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Invalid key"
+            }),
+            { status: 404, headers }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            license
           }),
           { headers }
         );
@@ -47,10 +86,7 @@ export default {
           success: false,
           error: "Not found"
         }),
-        {
-          status: 404,
-          headers
-        }
+        { status: 404, headers }
       );
 
     } catch (error) {
@@ -59,10 +95,7 @@ export default {
           success: false,
           error: error.message
         }),
-        {
-          status: 500,
-          headers
-        }
+        { status: 500, headers }
       );
     }
   }
