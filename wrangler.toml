@@ -1,3 +1,8 @@
 name = "dk-crazy-api-github"
 main = "worker.js"
 compatibility_date = "2026-09-20"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dk-crazy-db"
+database_id = "08fb6bf4-6a8a-4746-a13f-0c8df6c4adf9"
