@@ -42,7 +42,56 @@ export default {
       }
 
       // فحص مفتاح
-            // Activate license
+     // Activate license
+            // Create a new license key
+      if (url.pathname === "/create-key" && request.method === "POST") {
+        const body = await request.json();
+        const secret = body.secret;
+        const plan = body.plan;
+
+        if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Unauthorized"
+            }),
+            { status: 401, headers }
+          );
+        }
+
+        if (plan !== "DAY" && plan !== "WEEK") {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Invalid plan"
+            }),
+            { status: 400, headers }
+          );
+        }
+
+        const randomPart = crypto.randomUUID()
+          .replaceAll("-", "")
+          .substring(0, 10)
+          .toUpperCase();
+
+        const licenseKey = `DK-CRAZY-${plan}-${randomPart}`;
+
+        await env.DB
+          .prepare(
+            "INSERT INTO licenses (license_key, plan) VALUES (?, ?)"
+          )
+          .bind(licenseKey, plan)
+          .run();
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            license_key: licenseKey,
+            plan: plan
+          }),
+          { headers }
+        );
+      }
       if (url.pathname === "/activate" && request.method === "POST") {
         const body = await request.json();
         const key = body.key;
