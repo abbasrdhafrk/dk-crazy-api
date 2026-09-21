@@ -126,8 +126,11 @@ export default {
         const now = new Date();
         const expires = new Date(now);
 
-        if (license.plan === "DAY") {
-          expires.setDate(expires.getDate() + 1);
+if (license.plan === "DAY") {
+  expires.setDate(expires.getDate() + 1);
+} else if (license.plan === "WEEK") {
+  expires.setDate(expires.getDate() + 7);
+}
         }
 
         await env.DB
