@@ -131,8 +131,6 @@ if (license.plan === "DAY") {
 } else if (license.plan === "WEEK") {
   expires.setDate(expires.getDate() + 7);
 }
-        }
-
         await env.DB
           .prepare(
             "UPDATE licenses SET device_id = ?, activated_at = ?, expires_at = ? WHERE license_key = ?"
