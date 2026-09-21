@@ -92,7 +92,37 @@ export default {
             { status: 403, headers }
           );
         }
+        if (license.expires_at) {
+          const expiresAt = new Date(license.expires_at);
 
+          if (expiresAt <= new Date()) {
+            await env.DB
+              .prepare("UPDATE licenses SET status = 'EXPIRED' WHERE license_key = ?")
+              .bind(key)
+              .run();
+
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: "License expired"
+              }),
+              { status: 403, headers }
+            );
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message: "License already activated",
+              license_key: license.license_key,
+              plan: license.plan,
+              device_id: license.device_id,
+              activated_at: license.activated_at,
+              expires_at: license.expires_at
+            }),
+            { headers }
+          );
+        }
         const now = new Date();
         const expires = new Date(now);
 
