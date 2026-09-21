@@ -16,13 +16,10 @@ export default {
     try {
       // الصفحة الرئيسية
       if (url.pathname === "/") {
-        return new Response(
-          JSON.stringify({
-            status: "online",
-            message: "DK Crazy API is working"
-          }),
-          { headers }
-        );
+        return json({
+          status: "online",
+          message: "DK Crazy API is working"
+        }, headers);
       }
 
       // فحص قاعدة البيانات
@@ -31,80 +28,25 @@ export default {
           .prepare("SELECT 1 AS test")
           .first();
 
-        return new Response(
-          JSON.stringify({
-            success: true,
-            database: "connected",
-            result
-          }),
-          { headers }
-        );
+        return json({
+          success: true,
+          database: "connected",
+          result
+        }, headers);
       }
 
-      // فحص مفتاح
-     // Activate license
-            // Create a new license key
-      if (url.pathname === "/create-key" && request.method === "POST") {
+      // فحص المفتاح
+      if (url.pathname === "/check" && request.method === "POST") {
         const body = await request.json();
-        const secret = body.secret;
-        const plan = body.plan;
 
-        if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Unauthorized"
-            }),
-            { status: 401, headers }
-          );
-        }
+        const key = String(body.key || "").trim();
+        const deviceId = String(body.device_id || "").trim();
 
-        if (plan !== "DAY" && plan !== "WEEK") {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Invalid plan"
-            }),
-            { status: 400, headers }
-          );
-        }
-
-        const randomPart = crypto.randomUUID()
-          .replaceAll("-", "")
-          .substring(0, 10)
-          .toUpperCase();
-
-        const licenseKey = `DK-CRAZY-${plan}-${randomPart}`;
-
-        await env.DB
-          .prepare(
-            "INSERT INTO licenses (license_key, plan) VALUES (?, ?)"
-          )
-          .bind(licenseKey, plan)
-          .run();
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            license_key: licenseKey,
-            plan: plan
-          }),
-          { headers }
-        );
-      }
-      if (url.pathname === "/activate" && request.method === "POST") {
-        const body = await request.json();
-        const key = body.key;
-        const deviceId = body.device_id;
-
-        if (!key || !deviceId) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Missing key or device_id"
-            }),
-            { status: 400, headers }
-          );
+        if (!key) {
+          return json({
+            success: false,
+            error: "KEY_REQUIRED"
+          }, headers, 400);
         }
 
         const license = await env.DB
@@ -113,153 +55,234 @@ export default {
           .first();
 
         if (!license) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Invalid key"
-            }),
-            { status: 404, headers }
-          );
+          return json({
+            success: false,
+            valid: false,
+            error: "INVALID_KEY"
+          }, headers, 404);
         }
 
         if (license.status !== "ACTIVE") {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "License is not active"
-            }),
-            { status: 403, headers }
-          );
+          return json({
+            success: false,
+            valid: false,
+            error: "KEY_BLOCKED"
+          }, headers, 403);
         }
 
-        if (license.device_id && license.device_id !== deviceId) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "License is already activated on another device"
-            }),
-            { status: 403, headers }
-          );
+        if (
+          license.expires_at &&
+          new Date(license.expires_at).getTime() <= Date.now()
+        ) {
+          await env.DB
+            .prepare(
+              "UPDATE licenses SET status = 'EXPIRED' WHERE license_key = ?"
+            )
+            .bind(key)
+            .run();
+
+          return json({
+            success: false,
+            valid: false,
+            error: "KEY_EXPIRED"
+          }, headers, 403);
         }
-        if (license.expires_at) {
-          const expiresAt = new Date(license.expires_at);
 
-          if (expiresAt <= new Date()) {
-            await env.DB
-              .prepare("UPDATE licenses SET status = 'EXPIRED' WHERE license_key = ?")
-              .bind(key)
-              .run();
-
-            return new Response(
-              JSON.stringify({
-                success: false,
-                error: "License expired"
-              }),
-              { status: 403, headers }
-            );
-          }
-
-          return new Response(
-            JSON.stringify({
-              success: true,
-              message: "License already activated",
-              license_key: license.license_key,
-              plan: license.plan,
-              device_id: license.device_id,
-              activated_at: license.activated_at,
-              expires_at: license.expires_at
-            }),
-            { headers }
-          );
+        if (
+          deviceId &&
+          license.device_id &&
+          license.device_id !== deviceId
+        ) {
+          return json({
+            success: false,
+            valid: false,
+            error: "DEVICE_MISMATCH"
+          }, headers, 403);
         }
-        const now = new Date();
-        const expires = new Date(now);
 
-if (license.plan === "DAY") {
-  expires.setDate(expires.getDate() + 1);
-} else if (license.plan === "WEEK") {
-  expires.setDate(expires.getDate() + 7);
-}
-        await env.DB
-          .prepare(
-            "UPDATE licenses SET device_id = ?, activated_at = ?, expires_at = ? WHERE license_key = ?"
-          )
-          .bind(
-            deviceId,
-            now.toISOString(),
-            expires.toISOString(),
-            key
-          )
-          .run();
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            message: "License activated",
-            license_key: key,
-            plan: license.plan,
-            device_id: deviceId,
-            activated_at: now.toISOString(),
-            expires_at: expires.toISOString()
-          }),
-          { headers }
-        );
+        return json({
+          success: true,
+          valid: true,
+          plan: license.plan,
+          expires_at: license.expires_at || null
+        }, headers);
       }
-      if (url.pathname === "/check") {
-        const key = url.searchParams.get("key");
 
-        if (!key) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Missing key"
-            }),
-            { status: 400, headers }
-          );
+      // تفعيل المفتاح لأول جهاز
+      if (url.pathname === "/activate" && request.method === "POST") {
+        const body = await request.json();
+
+        const key = String(body.key || "").trim();
+        const deviceId = String(body.device_id || "").trim();
+
+        if (!key || !deviceId) {
+          return json({
+            success: false,
+            error: "KEY_AND_DEVICE_REQUIRED"
+          }, headers, 400);
         }
 
         const license = await env.DB
-          .prepare(
-            "SELECT license_key, plan, device_id, activated_at, expires_at, status FROM licenses WHERE license_key = ?"
-          )
+          .prepare("SELECT * FROM licenses WHERE license_key = ?")
           .bind(key)
           .first();
 
         if (!license) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Invalid key"
-            }),
-            { status: 404, headers }
-          );
+          return json({
+            success: false,
+            error: "INVALID_KEY"
+          }, headers, 404);
         }
 
-        return new Response(
-          JSON.stringify({
+        if (license.status !== "ACTIVE") {
+          return json({
+            success: false,
+            error: "KEY_NOT_ACTIVE"
+          }, headers, 403);
+        }
+
+        if (
+          license.expires_at &&
+          new Date(license.expires_at).getTime() <= Date.now()
+        ) {
+          await env.DB
+            .prepare(
+              "UPDATE licenses SET status = 'EXPIRED' WHERE license_key = ?"
+            )
+            .bind(key)
+            .run();
+
+          return json({
+            success: false,
+            error: "KEY_EXPIRED"
+          }, headers, 403);
+        }
+
+        // المفتاح مستخدم على جهاز آخر
+        if (license.device_id && license.device_id !== deviceId) {
+          return json({
+            success: false,
+            error: "KEY_ALREADY_USED"
+          }, headers, 403);
+        }
+
+        // مفعّل مسبقاً على نفس الجهاز
+        if (license.device_id === deviceId) {
+          return json({
             success: true,
-            license
-          }),
-          { headers }
+            activated: true,
+            already_activated: true,
+            plan: license.plan,
+            expires_at: license.expires_at
+          }, headers);
+        }
+
+        let days;
+
+        if (license.plan === "DAY") {
+          days = 1;
+        } else if (license.plan === "WEEK") {
+          days = 7;
+        } else {
+          return json({
+            success: false,
+            error: "INVALID_PLAN"
+          }, headers, 400);
+        }
+
+        const activatedAt = new Date();
+        const expiresAt = new Date(
+          activatedAt.getTime() + days * 24 * 60 * 60 * 1000
         );
+
+        await env.DB
+          .prepare(`
+            UPDATE licenses
+            SET device_id = ?,
+                activated_at = ?,
+                expires_at = ?
+            WHERE license_key = ?
+          `)
+          .bind(
+            deviceId,
+            activatedAt.toISOString(),
+            expiresAt.toISOString(),
+            key
+          )
+          .run();
+
+        return json({
+          success: true,
+          activated: true,
+          key,
+          plan: license.plan,
+          activated_at: activatedAt.toISOString(),
+          expires_at: expiresAt.toISOString()
+        }, headers);
       }
 
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Not found"
-        }),
-        { status: 404, headers }
-      );
+      // إنشاء مفتاح جديد
+      if (url.pathname === "/create-key" && request.method === "POST") {
+        const body = await request.json();
+
+        if (!env.ADMIN_SECRET || body.secret !== env.ADMIN_SECRET) {
+          return json({
+            success: false,
+            error: "UNAUTHORIZED"
+          }, headers, 401);
+        }
+
+        const plan = String(body.plan || "").toUpperCase();
+
+        if (plan !== "DAY" && plan !== "WEEK") {
+          return json({
+            success: false,
+            error: "PLAN_MUST_BE_DAY_OR_WEEK"
+          }, headers, 400);
+        }
+
+        const random = crypto.randomUUID()
+          .replaceAll("-", "")
+          .substring(0, 10)
+          .toUpperCase();
+
+        const key = `DK-CRAZY-${plan}-${random}`;
+
+        await env.DB
+          .prepare(`
+            INSERT INTO licenses
+            (license_key, plan, status)
+            VALUES (?, ?, 'ACTIVE')
+          `)
+          .bind(key, plan)
+          .run();
+
+        return json({
+          success: true,
+          key,
+          plan,
+          status: "ACTIVE"
+        }, headers);
+      }
+
+      return json({
+        success: false,
+        error: "NOT_FOUND"
+      }, headers, 404);
 
     } catch (error) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: error.message
-        }),
-        { status: 500, headers }
-      );
+      return json({
+        success: false,
+        error: "SERVER_ERROR",
+        message: String(error.message || error)
+      }, headers, 500);
     }
   }
 };
+
+function json(data, headers, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers
+  });
+}
